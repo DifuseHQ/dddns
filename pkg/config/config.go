@@ -34,7 +34,7 @@ func InitConfig() Config {
 	flag.StringVar(&cfg.DNSPort, "dns-port", "5544", "DNS server port")
 	flag.StringVar(&cfg.HTTPPort, "http-addr", "::", "HTTP server bind address")
 	flag.StringVar(&cfg.HTTPPort, "http-port", "3000", "HTTP server port")
-	flag.StringVar(&cfg.Domain, "domain", "difusedns.com", "Domain to use for DNS records")
+	flag.StringVar(&cfg.Domain, "domain", "dddns.network", "Domain to use for DNS records")
 
 	flag.Parse()
 
