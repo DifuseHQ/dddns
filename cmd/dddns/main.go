@@ -19,8 +19,8 @@ func main() {
 	logger.Log.Info("Starting DDDNS")
 
 	db.InitDB(cfg.Domain)
-	go dns.InitDNSServer(db.Database, fmt.Sprintf("%s:%s", cfg.DNSAddr, cfg.DNSPort))
 
+	go dns.InitDNSServer(cfg.DNSAddr, cfg.DNSPort)
 	logger.Log.Info("DNS server initialized")
 
 	app := fiber.New(fiber.Config{

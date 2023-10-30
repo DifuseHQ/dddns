@@ -2,36 +2,62 @@ package dns
 
 import (
 	"database/sql"
+	"github.com/DifuseHQ/dddns/internal/db"
 	"github.com/DifuseHQ/dddns/pkg/logger"
-	"strings"
+	"github.com/phuslu/fastdns"
+	"log"
+	"net/netip"
+	"os"
 	"sync"
 	"time"
 
-	"github.com/DifuseHQ/dddns/internal/db"
 	"github.com/DifuseHQ/dddns/internal/db/model"
-	"github.com/miekg/dns"
 )
 
-func InitDNSServer(database *sql.DB, address string) {
-	dns.HandleFunc(".", func(w dns.ResponseWriter, r *dns.Msg) {
-		m := new(dns.Msg)
-		m.SetReply(r)
-		for _, q := range m.Question {
-			clientIP := strings.Split(w.RemoteAddr().String(), ":")[0]
+type DNSHandler struct {
+	Debug bool
+}
 
-			switch q.Qtype {
-			case dns.TypeA:
-				handleAQuery(database, m, q, clientIP)
-			case dns.TypeAAAA:
-				handleAAAAQuery(database, m, q, clientIP)
-			}
-		}
-		w.WriteMsg(m)
-	})
+func InitDNSServer(dnsAddr string, dnsPort string) {
+	dnsBind := dnsAddr + ":" + dnsPort
+	server := &fastdns.Server{
+		Handler: &DNSHandler{
+			Debug: os.Getenv("DEBUG") != "",
+		},
+		Stats: &fastdns.CoreStats{
+			Prefix: "coredns_",
+			Family: "1",
+			Proto:  "udp",
+			Server: "dns://" + dnsBind,
+			Zone:   ".",
+		},
+	}
 
-	err := dns.ListenAndServe(address, "udp", nil)
+	err := server.ListenAndServe(dnsBind)
+
 	if err != nil {
-		logger.Log.Fatal("Failed to set up DNS server", err)
+		logger.Log.Fatal("Failed to start DNS server ", err)
+	}
+}
+
+func (h *DNSHandler) ServeDNS(rw fastdns.ResponseWriter, req *fastdns.Message) {
+	if h.Debug {
+		log.Printf("%s: CLASS %s TYPE %s\n", string(req.Domain), req.Question.Class, req.Question.Type)
+	}
+
+	domain := string(req.Domain)
+
+	if domain != "" {
+		switch req.Question.Type {
+		case fastdns.TypeA:
+			h.handleA(domain, rw, req)
+		case fastdns.TypeAAAA:
+			h.handleAAAA(domain, rw, req)
+		default:
+			fastdns.Error(rw, req, fastdns.RcodeNXDomain)
+		}
+	} else {
+		fastdns.Error(rw, req, fastdns.RcodeNXDomain)
 	}
 }
 
@@ -45,67 +71,55 @@ var (
 	cacheMutex = &sync.RWMutex{}
 )
 
-func handleAQuery(database *sql.DB, m *dns.Msg, q dns.Question, clientIP string) {
-	domain := strings.TrimSuffix(q.Name, ".")
-	queryType := model.QueryTypeA
-
+func (h *DNSHandler) handleA(domain string, rw fastdns.ResponseWriter, req *fastdns.Message) {
 	cacheMutex.RLock()
 	cached, found := cache[domain]
 	cacheMutex.RUnlock()
 
 	if found && time.Since(cached.Timestamp) < time.Minute {
-		if cached.Record.ARecord != "" {
-			rr, _ := dns.NewRR(q.Name + " IN A " + cached.Record.ARecord)
-			m.Answer = append(m.Answer, rr)
-			db.UpdateQueryLog(database, clientIP, queryType, true)
+		if cached.Record != nil && cached.Record.ARecord != "" {
+			ip := netip.MustParseAddr(cached.Record.ARecord)
+			fastdns.HOST(rw, req, 60, []netip.Addr{ip})
 			return
 		}
 	}
 
-	record := getRecordFromDB(database, domain)
-
+	record := getRecordFromDB(db.Database, domain)
 	if record != nil && record.ARecord != "" {
-		rr, _ := dns.NewRR(q.Name + " IN A " + record.ARecord)
-		m.Answer = append(m.Answer, rr)
-		db.UpdateQueryLog(database, clientIP, queryType, true)
+		ip := netip.MustParseAddr(record.ARecord)
+		fastdns.HOST(rw, req, 60, []netip.Addr{ip})
+
 		cacheMutex.Lock()
 		cache[domain] = CachedRecord{Record: record, Timestamp: time.Now()}
 		cacheMutex.Unlock()
 	} else {
-		m.SetRcode(m, dns.RcodeNameError)
-		db.UpdateQueryLog(database, clientIP, queryType, false)
+		fastdns.Error(rw, req, fastdns.RcodeNXDomain)
 	}
 }
 
-func handleAAAAQuery(database *sql.DB, m *dns.Msg, q dns.Question, clientIP string) {
-	domain := strings.TrimSuffix(q.Name, ".")
-	queryType := model.QueryTypeAAAA
-
+func (h *DNSHandler) handleAAAA(domain string, rw fastdns.ResponseWriter, req *fastdns.Message) {
 	cacheMutex.RLock()
 	cached, found := cache[domain]
 	cacheMutex.RUnlock()
 
 	if found && time.Since(cached.Timestamp) < time.Minute {
-		if cached.Record.AAAARecord != "" {
-			rr, _ := dns.NewRR(q.Name + " IN AAAA " + cached.Record.AAAARecord)
-			m.Answer = append(m.Answer, rr)
-			db.UpdateQueryLog(database, clientIP, queryType, true)
+		if cached.Record != nil && cached.Record.AAAARecord != "" {
+			ip := netip.MustParseAddr(cached.Record.AAAARecord)
+			fastdns.HOST(rw, req, 60, []netip.Addr{ip})
 			return
 		}
 	}
 
-	record := getRecordFromDB(database, domain)
-
+	record := getRecordFromDB(db.Database, domain)
 	if record != nil && record.AAAARecord != "" {
-		rr, _ := dns.NewRR(q.Name + " IN AAAA " + record.AAAARecord)
-		m.Answer = append(m.Answer, rr)
-		db.UpdateQueryLog(database, clientIP, queryType, true)
+		ip := netip.MustParseAddr(record.AAAARecord)
+		fastdns.HOST(rw, req, 60, []netip.Addr{ip})
+
 		cacheMutex.Lock()
 		cache[domain] = CachedRecord{Record: record, Timestamp: time.Now()}
 		cacheMutex.Unlock()
 	} else {
-		m.SetRcode(m, dns.RcodeNameError)
-		db.UpdateQueryLog(database, clientIP, queryType, false)
+		fastdns.Error(rw, req, fastdns.RcodeNXDomain)
 	}
 }
 
