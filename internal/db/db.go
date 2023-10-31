@@ -7,6 +7,7 @@ import (
 	"github.com/DifuseHQ/dddns/pkg/logger"
 	_ "github.com/mattn/go-sqlite3"
 	"os"
+	"strings"
 )
 
 var Database *sql.DB
@@ -66,9 +67,8 @@ func InitDB(domain string) {
 }
 
 func InsertOrUpdateRecord(database *sql.DB, record *model.Record, domain string) (bool, error) {
-	if record.Domain != domain && record.Domain != "loopback."+domain {
-		err := fmt.Errorf("record domain %s doesn't match domain %s", record.Domain, domain)
-		return false, err
+	if !strings.HasSuffix(record.Domain, domain) {
+		return false, fmt.Errorf("record domain requested %s doesn't include domain %s", record.Domain, domain)
 	}
 
 	upsertSQL := `
@@ -84,11 +84,10 @@ func InsertOrUpdateRecord(database *sql.DB, record *model.Record, domain string)
 	_, err := database.Exec(upsertSQL, record.UUID, record.Domain, record.ARecord, record.AAAARecord)
 	if err != nil {
 		logger.Log.Error("Error inserting or updating record ", err.Error())
-		return false, err
+		return false, fmt.Errorf("error inserting or updating record")
 	}
 
 	logger.Log.Debug("Record inserted or updated ", record)
-
 	return true, nil
 }
 

@@ -42,7 +42,7 @@ func main() {
 		AllowOrigins: "*",
 	}))
 
-	manageRecords.Post("/create-or-update", middleware.UUIDCheckMiddleware, handler.CreateRecord)
+	manageRecords.Post("/create-or-update", middleware.UUIDCheckMiddleware, handler.CreateRecord(cfg))
 	manageRecords.Delete("/delete", middleware.UUIDCheckMiddleware, handler.DeleteRecord)
 
 	err := app.Listen(fmt.Sprintf("%s:%s", cfg.HTTPAddr, cfg.HTTPPort))
