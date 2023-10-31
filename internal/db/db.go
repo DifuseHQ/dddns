@@ -56,7 +56,7 @@ func InitDB(domain string) {
 		Domain:     "loopback." + domain,
 		ARecord:    "127.0.0.1",
 		AAAARecord: "::1",
-	})
+	}, domain)
 
 	if err != nil {
 		logger.Log.Fatal("Error inserting initial record", err.Error())
@@ -65,7 +65,12 @@ func InitDB(domain string) {
 	logger.Log.Info("Database initialized")
 }
 
-func InsertOrUpdateRecord(database *sql.DB, record *model.Record) (bool, error) {
+func InsertOrUpdateRecord(database *sql.DB, record *model.Record, domain string) (bool, error) {
+	if record.Domain != domain && record.Domain != "loopback."+domain {
+		err := fmt.Errorf("record domain %s doesn't match domain %s", record.Domain, domain)
+		return false, err
+	}
+
 	upsertSQL := `
 	INSERT INTO records (uuid, domain, a_record, aaaa_record, last_update_at)
 	VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)

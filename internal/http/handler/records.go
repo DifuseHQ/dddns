@@ -27,7 +27,7 @@ func CreateRecord(c *fiber.Ctx) error {
 		AAAARecord: body.IPv6,
 	}
 
-	success, err := db.InsertOrUpdateRecord(db.Database, record)
+	success, err := db.InsertOrUpdateRecord(db.Database, record, record.Domain)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to insert or update record"})
 	}
