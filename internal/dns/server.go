@@ -6,6 +6,7 @@ import (
 	"github.com/DifuseHQ/dddns/pkg/logger"
 	"github.com/phuslu/fastdns"
 	"log"
+	"net"
 	"net/netip"
 	"os"
 	"sync"
@@ -53,6 +54,10 @@ func (h *DNSHandler) ServeDNS(rw fastdns.ResponseWriter, req *fastdns.Message) {
 			h.handleA(domain, rw, req)
 		case fastdns.TypeAAAA:
 			h.handleAAAA(domain, rw, req)
+		case fastdns.TypeSOA:
+			fastdns.SOA(rw, req, 60, net.NS{"ns1.difusedns.com"}, net.NS{"ns2.difusedns.com"}, 1, 3600, 3600, 3600, 60)
+		case fastdns.TypeNS:
+			fastdns.NS(rw, req, 60, []net.NS{{"ns1.difusedns.com"}, {"ns2.difusedns.com"}})
 		default:
 			fastdns.Error(rw, req, fastdns.RcodeNXDomain)
 		}
