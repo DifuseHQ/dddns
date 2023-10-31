@@ -20,7 +20,7 @@ func main() {
 
 	db.InitDB(cfg.Domain)
 
-	go dns.InitDNSServer(cfg.DNSAddr, cfg.DNSPort)
+	go dns.InitDNSServer(cfg.DNSAddr, cfg.DNSPort, cfg.Domain)
 	logger.Log.Info("DNS server initialized")
 
 	app := fiber.New(fiber.Config{

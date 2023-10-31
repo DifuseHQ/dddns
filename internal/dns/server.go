@@ -18,7 +18,7 @@ type DNSHandler struct {
 	Debug bool
 }
 
-func InitDNSServer(dnsAddr string, dnsPort string) {
+func InitDNSServer(dnsAddr string, dnsPort string, domain string) {
 	dnsBind := dnsAddr + ":" + dnsPort
 	server := &fastdns.Server{
 		Handler: &DNSHandler{
@@ -29,7 +29,7 @@ func InitDNSServer(dnsAddr string, dnsPort string) {
 			Family: "1",
 			Proto:  "udp",
 			Server: "dns://" + dnsBind,
-			Zone:   ".",
+			Zone:   domain + ".",
 		},
 	}
 
