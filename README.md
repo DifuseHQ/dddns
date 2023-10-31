@@ -87,6 +87,6 @@ The service provides several HTTP endpoints for DNS record management and queryi
 * `POST /manage-record/create-or-update`: Create or update a DNS record.
 * `DELETE /manage-record/delete`: Delete a DNS record.
 
-License
+## License
 
 DDDNS is licensed under the MIT License. See [LICENSE.md](LICENSE.md) for more information.
