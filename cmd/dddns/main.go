@@ -15,17 +15,21 @@ import (
 func main() {
 	cfg := config.InitConfig()
 
-	logger.InitLogger(cfg.LogPath)
+	logger.InitLogger(cfg.LogPath, cfg.LogLevel, config.GetVersion())
 	logger.Log.Info("Starting DDDNS")
 
 	db.InitDB(cfg.Domain)
 
-	go dns.InitDNSServer(cfg.DNSAddr, cfg.DNSPort, cfg.Domain)
+	dnsServer := &dns.DNSServer{}
+	go dnsServer.InitDNSServer(cfg.DNSAddr, cfg.DNSPort, cfg.NameServerDomain, cfg.Domain, cfg.MailBox, cfg.Authoritative)
+
 	logger.Log.Info("DNS server initialized")
 
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: true,
 	})
+
+	app.Get("/", handler.GetDNSStatistics(dnsServer))
 
 	checks := app.Group("/checks", cors.New(cors.Config{
 		AllowOrigins: "*",
@@ -39,7 +43,7 @@ func main() {
 	}))
 
 	manageRecords.Post("/create-or-update", middleware.UUIDCheckMiddleware, handler.CreateRecord)
-	manageRecords.Get("/delete", middleware.UUIDCheckMiddleware, handler.DeleteRecord)
+	manageRecords.Delete("/delete", middleware.UUIDCheckMiddleware, handler.DeleteRecord)
 
 	err := app.Listen(fmt.Sprintf("%s:%s", cfg.HTTPAddr, cfg.HTTPPort))
 

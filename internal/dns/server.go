@@ -3,136 +3,200 @@ package dns
 import (
 	"database/sql"
 	"github.com/DifuseHQ/dddns/internal/db"
-	"github.com/DifuseHQ/dddns/pkg/logger"
-	"github.com/phuslu/fastdns"
-	"log"
-	"net"
-	"net/netip"
-	"os"
-	"sync"
-	"time"
-
 	"github.com/DifuseHQ/dddns/internal/db/model"
+	"github.com/DifuseHQ/dddns/internal/utils"
+	"github.com/DifuseHQ/dddns/pkg/logger"
+	"github.com/miekg/dns"
+	"net"
+	"strings"
+	"time"
 )
 
-type DNSHandler struct {
-	Debug bool
+type DNSStatistics struct {
+	TotalQueries      int64
+	SuccessfulQueries int64
+	FailedQueries     int64
+	SOAQueries        int64
+	NSQueries         int64
+	AQueries          int64
+	AAAAQueries       int64
 }
 
-func InitDNSServer(dnsAddr string, dnsPort string, domain string) {
-	dnsBind := dnsAddr + ":" + dnsPort
-	server := &fastdns.Server{
-		Handler: &DNSHandler{
-			Debug: os.Getenv("DEBUG") != "",
-		},
-		Stats: &fastdns.CoreStats{
-			Prefix: "coredns_",
-			Family: "1",
-			Proto:  "udp",
-			Server: "dns://" + dnsBind,
-			Zone:   domain + ".",
-		},
+type DNSServer struct {
+	addr       string
+	protocol   string
+	nameserver string
+	domain     string
+	mailbox    string
+	StartTime  int64
+	authority  bool
+	Stats      DNSStatistics
+}
+
+func (s *DNSServer) InitDNSServer(dnsAddr string, dnsPort string, nameServer string, domain string, mailbox string, authority bool) {
+	srv := &dns.Server{
+		Addr:    dnsAddr + ":" + dnsPort,
+		Net:     "udp",
+		Handler: s,
 	}
 
-	err := server.ListenAndServe(dnsBind)
+	if !strings.HasSuffix(nameServer, ".") {
+		nameServer = nameServer + "."
+	}
 
-	if err != nil {
-		logger.Log.Fatal("Failed to start DNS server ", err)
+	if !strings.HasSuffix(mailbox, ".") {
+		mailbox = mailbox + "."
+	}
+
+	s.nameserver = nameServer
+	s.mailbox = mailbox
+	s.domain = domain
+	s.authority = authority
+	s.StartTime = time.Now().Unix()
+
+	if err := srv.ListenAndServe(); err != nil {
+		logger.Log.Fatal("Failed to start DNS server ", err.Error())
 	}
 }
 
-func (h *DNSHandler) ServeDNS(rw fastdns.ResponseWriter, req *fastdns.Message) {
-	if h.Debug {
-		log.Printf("%s: CLASS %s TYPE %s\n", string(req.Domain), req.Question.Class, req.Question.Type)
-	}
+func (s *DNSServer) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
+	qname := strings.ToLower(dns.Name(r.Question[0].Name).String())
+	qtype := r.Question[0].Qtype
 
-	domain := string(req.Domain)
+	logger.Log.Debug("Received DNS query: ", qname, " Type: ", qtype)
 
-	if domain != "" {
-		switch req.Question.Type {
-		case fastdns.TypeA:
-			h.handleA(domain, rw, req)
-		case fastdns.TypeAAAA:
-			h.handleAAAA(domain, rw, req)
-		case fastdns.TypeSOA:
-			fastdns.SOA(rw, req, 60, net.NS{"ns1.difusedns.com"}, net.NS{"ns2.difusedns.com"}, 1, 3600, 3600, 3600, 60)
-		case fastdns.TypeNS:
-			fastdns.NS(rw, req, 60, []net.NS{{"ns1.difusedns.com"}, {"ns2.difusedns.com"}})
-		default:
-			fastdns.Error(rw, req, fastdns.RcodeNXDomain)
+	var answers []dns.RR
+	var responseCode int
+
+	s.Stats.TotalQueries++
+
+	record := getRecordFromDB(db.Database, qname)
+	logger.Log.Debug("Queried DB for record: ", qname)
+
+	if record != nil {
+		logger.Log.Debug("Record found for ", qname)
+		if qtype == dns.TypeA && record.ARecord != "" {
+			answers = append(answers, aRecord(qname, 60, record.ARecord))
+			responseCode = dns.RcodeSuccess
+			s.Stats.AQueries++
+			logger.Log.Debug("A record found for ", qname)
+		} else if qtype == dns.TypeAAAA && record.AAAARecord != "" {
+			answers = append(answers, aaaaRecord(qname, 60, record.AAAARecord))
+			responseCode = dns.RcodeSuccess
+			s.Stats.AAAAQueries++
+			logger.Log.Debug("AAAA record found for ", qname)
+		} else {
+			responseCode = dns.RcodeNameError
+			logger.Log.Debug("No matching record type found for ", qname)
 		}
 	} else {
-		fastdns.Error(rw, req, fastdns.RcodeNXDomain)
+		responseCode = dns.RcodeNameError
+		logger.Log.Debug("No record found for ", qname)
 	}
-}
 
-type CachedRecord struct {
-	Record    *model.Record
-	Timestamp time.Time
-}
-
-var (
-	cache      = make(map[string]CachedRecord)
-	cacheMutex = &sync.RWMutex{}
-)
-
-func (h *DNSHandler) handleA(domain string, rw fastdns.ResponseWriter, req *fastdns.Message) {
-	cacheMutex.RLock()
-	cached, found := cache[domain]
-	cacheMutex.RUnlock()
-
-	if found && time.Since(cached.Timestamp) < time.Minute {
-		if cached.Record != nil && cached.Record.ARecord != "" {
-			ip := netip.MustParseAddr(cached.Record.ARecord)
-			fastdns.HOST(rw, req, 60, []netip.Addr{ip})
-			return
+	if qtype == dns.TypeSOA {
+		soaR := soaRecord(s, qname)
+		if soaR == nil {
+			responseCode = dns.RcodeNameError
+			logger.Log.Debug("No SOA record found for ", qname)
+		} else {
+			answers = append(answers, soaR)
+			responseCode = dns.RcodeSuccess
+			logger.Log.Debug("SOA record appended for ", qname)
 		}
+		s.Stats.SOAQueries++
+	} else if qtype == dns.TypeNS {
+		nsR := nsRecord(s, qname)
+		if nsR == nil {
+			responseCode = dns.RcodeNameError
+			logger.Log.Debug("No NS record found for ", qname)
+		} else {
+			answers = append(answers, nsR)
+			responseCode = dns.RcodeSuccess
+			logger.Log.Debug("NS record appended for ", qname)
+		}
+		s.Stats.NSQueries++
 	}
 
-	record := getRecordFromDB(db.Database, domain)
-	if record != nil && record.ARecord != "" {
-		ip := netip.MustParseAddr(record.ARecord)
-		fastdns.HOST(rw, req, 60, []netip.Addr{ip})
-
-		cacheMutex.Lock()
-		cache[domain] = CachedRecord{Record: record, Timestamp: time.Now()}
-		cacheMutex.Unlock()
+	if responseCode == dns.RcodeSuccess {
+		s.Stats.SuccessfulQueries++
 	} else {
-		fastdns.Error(rw, req, fastdns.RcodeNXDomain)
+		s.Stats.FailedQueries++
+	}
+
+	m := new(dns.Msg)
+	m.SetReply(r)
+	m.Authoritative = s.authority
+	m.Answer = answers
+	m.Rcode = responseCode
+
+	w.WriteMsg(m)
+
+	logger.Log.Debug("Response sent for ", qname, " with Rcode: ", responseCode)
+}
+
+func aRecord(name string, ttl uint32, ipAddress string) *dns.A {
+	return &dns.A{
+		Hdr: dns.RR_Header{Name: name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: ttl},
+		A:   net.ParseIP(ipAddress).To4(),
 	}
 }
 
-func (h *DNSHandler) handleAAAA(domain string, rw fastdns.ResponseWriter, req *fastdns.Message) {
-	cacheMutex.RLock()
-	cached, found := cache[domain]
-	cacheMutex.RUnlock()
+func aaaaRecord(name string, ttl uint32, ipAddress string) *dns.AAAA {
+	return &dns.AAAA{
+		Hdr:  dns.RR_Header{Name: name, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: ttl},
+		AAAA: net.ParseIP(ipAddress),
+	}
+}
 
-	if found && time.Since(cached.Timestamp) < time.Minute {
-		if cached.Record != nil && cached.Record.AAAARecord != "" {
-			ip := netip.MustParseAddr(cached.Record.AAAARecord)
-			fastdns.HOST(rw, req, 60, []netip.Addr{ip})
-			return
-		}
+func soaRecord(s *DNSServer, qname string) *dns.SOA {
+	serial := utils.GenerateSerial()
+	refresh := 3600
+	retry := 600
+	expire := 1209600
+	minTTL := 300
+
+	if !strings.HasSuffix(qname, ".") {
+		qname = qname + "."
 	}
 
-	record := getRecordFromDB(db.Database, domain)
-	if record != nil && record.AAAARecord != "" {
-		ip := netip.MustParseAddr(record.AAAARecord)
-		fastdns.HOST(rw, req, 60, []netip.Addr{ip})
-
-		cacheMutex.Lock()
-		cache[domain] = CachedRecord{Record: record, Timestamp: time.Now()}
-		cacheMutex.Unlock()
+	if utils.StringContains(qname, s.domain) {
+		return &dns.SOA{
+			Hdr:     dns.RR_Header{Name: qname, Rrtype: dns.TypeSOA, Class: dns.ClassINET, Ttl: 60},
+			Ns:      s.nameserver,
+			Mbox:    s.mailbox,
+			Serial:  serial,
+			Refresh: uint32(refresh),
+			Retry:   uint32(retry),
+			Expire:  uint32(expire),
+			Minttl:  uint32(minTTL),
+		}
 	} else {
-		fastdns.Error(rw, req, fastdns.RcodeNXDomain)
+		return nil
+	}
+}
+
+func nsRecord(s *DNSServer, qname string) *dns.NS {
+	if utils.StringContains(qname, s.domain) {
+		return &dns.NS{
+			Hdr: dns.RR_Header{Name: qname, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 60},
+			Ns:  s.nameserver,
+		}
+	} else {
+		return nil
 	}
 }
 
 func getRecordFromDB(database *sql.DB, domain string) *model.Record {
 	record := &model.Record{}
-	query := `SELECT uuid, domain, a_record, aaaa_record, created_at, last_update_at FROM records WHERE domain = ?`
 
-	err := database.QueryRow(query, domain).Scan(&record.UUID, &record.Domain, &record.ARecord, &record.AAAARecord, &record.CreatedAt, &record.LastUpdateAt)
+	if strings.HasSuffix(domain, ".") {
+		domain = domain[:len(domain)-1]
+	}
+
+	query := `SELECT domain, a_record, aaaa_record FROM records WHERE domain = ?`
+
+	err := database.QueryRow(query, domain).Scan(&record.Domain, &record.ARecord, &record.AAAARecord)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			logger.Log.Debug("No record found for domain", domain)
@@ -143,6 +207,5 @@ func getRecordFromDB(database *sql.DB, domain string) *model.Record {
 		return nil
 	}
 
-	logger.Log.Debug("Found record", record.ARecord)
 	return record
 }
