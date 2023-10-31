@@ -1,4 +1,4 @@
-# DDDNS - Difuse DNS Service
+# DDDNS - Difuse Dynamic DNS Service
 
 DDDNS is an easy way to run an authoritative DNS server for your domain. It comes with a rudimentary authentication mechanism that can be adapted to your needs.
 
