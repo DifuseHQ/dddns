@@ -31,9 +31,11 @@ type DNSServer struct {
 	StartTime  int64
 	authority  bool
 	Stats      DNSStatistics
+	TunnelA    string
+	TunnelAAAA string
 }
 
-func (s *DNSServer) InitDNSServer(dnsAddr string, dnsPort string, nameServer string, domain string, mailbox string, authority bool) {
+func (s *DNSServer) InitDNSServer(dnsAddr string, dnsPort string, nameServer string, domain string, mailbox string, authority bool, tunnelA string, tunnelAAAA string) {
 	srv := &dns.Server{
 		Addr:    dnsAddr + ":" + dnsPort,
 		Net:     "udp",
@@ -53,6 +55,8 @@ func (s *DNSServer) InitDNSServer(dnsAddr string, dnsPort string, nameServer str
 	s.domain = domain
 	s.authority = authority
 	s.StartTime = time.Now().Unix()
+	s.TunnelA = tunnelA
+	s.TunnelAAAA = tunnelAAAA
 
 	if err := srv.ListenAndServe(); err != nil {
 		logger.Log.Fatal("Failed to start DNS server ", err.Error())
@@ -69,6 +73,20 @@ func (s *DNSServer) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	var responseCode int
 
 	s.Stats.TotalQueries++
+
+	if utils.StringContains(qname, "tunnel.difusedns.com") {
+		if qtype == dns.TypeA {
+			answers = append(answers, aRecord(qname, 60, s.TunnelA))
+			responseCode = dns.RcodeSuccess
+			s.Stats.AQueries++
+		} else if qtype == dns.TypeAAAA {
+			answers = append(answers, aaaaRecord(qname, 60, s.TunnelAAAA))
+			responseCode = dns.RcodeSuccess
+			s.Stats.AAAAQueries++
+		} else {
+			responseCode = dns.RcodeNameError
+		}
+	}
 
 	record := getRecordFromDB(db.Database, qname)
 	logger.Log.Debug("Queried DB for record: ", qname)
@@ -90,7 +108,7 @@ func (s *DNSServer) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 			logger.Log.Debug("No matching record type found for ", qname)
 		}
 	} else {
-		responseCode = dns.RcodeNameError
+		responseCode = dns.RcodeSuccess
 		logger.Log.Debug("No record found for ", qname)
 	}
 

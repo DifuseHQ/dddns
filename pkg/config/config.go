@@ -22,6 +22,8 @@ type Config struct {
 	MailBox          string `json:"mail_box"`
 	Authoritative    bool   `json:"authoritative"`
 	LogLevel         int    `json:"log_level"`
+	TunnelARecord    string `json:"tunnel_a_record"`
+	TunnelAAAARecord string `json:"tunnel_aaaa_record"`
 }
 
 func InitConfig() Config {
@@ -45,6 +47,8 @@ func InitConfig() Config {
 	flag.StringVar(&cfg.MailBox, "mail-box", "admin.difusedns.com", "Mail box to use for SOA records")
 	flag.BoolVar(&cfg.Authoritative, "authoritative", true, "Whether or not to be authoritative for the domain")
 	flag.IntVar(&cfg.LogLevel, "log-level", 0, "Log level (0-1)")
+	flag.StringVar(&cfg.TunnelARecord, "tunnel-a-record", "0.0.0.0", "A record to use for tunneling")
+	flag.StringVar(&cfg.TunnelAAAARecord, "tunnel-aaaa-record", "::", "AAAA record to use for tunneling")
 
 	flag.Parse()
 

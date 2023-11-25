@@ -21,7 +21,7 @@ func main() {
 	db.InitDB(cfg.Domain)
 
 	dnsServer := &dns.DNSServer{}
-	go dnsServer.InitDNSServer(cfg.DNSAddr, cfg.DNSPort, cfg.NameServerDomain, cfg.Domain, cfg.MailBox, cfg.Authoritative)
+	go dnsServer.InitDNSServer(cfg.DNSAddr, cfg.DNSPort, cfg.NameServerDomain, cfg.Domain, cfg.MailBox, cfg.Authoritative, cfg.TunnelARecord, cfg.TunnelAAAARecord)
 
 	logger.Log.Info("DNS server initialized")
 
