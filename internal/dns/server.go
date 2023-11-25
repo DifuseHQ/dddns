@@ -104,7 +104,7 @@ func (s *DNSServer) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 			s.Stats.AAAAQueries++
 			logger.Log.Debug("AAAA record found for ", qname)
 		} else {
-			responseCode = dns.RcodeNameError
+			responseCode = dns.RcodeSuccess
 			logger.Log.Debug("No matching record type found for ", qname)
 		}
 	} else {
