@@ -74,7 +74,21 @@ func (s *DNSServer) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 	s.Stats.TotalQueries++
 
-	if utils.StringContains(qname, "tunnel.difusedns.com") {
+	if utils.DomainEndsWith(qname, ".backname.difusedns.com") {
+		logger.Log.Debug("Backname hostname found for ", qname)
+		ipAddress := utils.ParseIPAddressFromHostname(qname)
+		if qtype == dns.TypeA {
+			answers = append(answers, aRecord(qname, 60, ipAddress))
+			responseCode = dns.RcodeSuccess
+			s.Stats.AQueries++
+		} else if qtype == dns.TypeAAAA {
+			answers = append(answers, aaaaRecord(qname, 60, ipAddress))
+			responseCode = dns.RcodeSuccess
+			s.Stats.AAAAQueries++
+		} else {
+			responseCode = dns.RcodeNameError
+		}
+	} else if utils.StringContains(qname, "tunnel.difusedns.com") {
 		if qtype == dns.TypeA {
 			answers = append(answers, aRecord(qname, 60, s.TunnelA))
 			responseCode = dns.RcodeSuccess
@@ -86,30 +100,30 @@ func (s *DNSServer) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		} else {
 			responseCode = dns.RcodeNameError
 		}
-	}
+	} else {
+		record := getRecordFromDB(db.Database, qname)
+		logger.Log.Debug("Queried DB for record: ", qname)
 
-	record := getRecordFromDB(db.Database, qname)
-	logger.Log.Debug("Queried DB for record: ", qname)
-
-	if record != nil {
-		logger.Log.Debug("Record found for ", qname)
-		if qtype == dns.TypeA && record.ARecord != "" {
-			answers = append(answers, aRecord(qname, 60, record.ARecord))
-			responseCode = dns.RcodeSuccess
-			s.Stats.AQueries++
-			logger.Log.Debug("A record found for ", qname)
-		} else if qtype == dns.TypeAAAA && record.AAAARecord != "" {
-			answers = append(answers, aaaaRecord(qname, 60, record.AAAARecord))
-			responseCode = dns.RcodeSuccess
-			s.Stats.AAAAQueries++
-			logger.Log.Debug("AAAA record found for ", qname)
+		if record != nil {
+			logger.Log.Debug("Record found for ", qname)
+			if qtype == dns.TypeA && record.ARecord != "" {
+				answers = append(answers, aRecord(qname, 60, record.ARecord))
+				responseCode = dns.RcodeSuccess
+				s.Stats.AQueries++
+				logger.Log.Debug("A record found for ", qname)
+			} else if qtype == dns.TypeAAAA && record.AAAARecord != "" {
+				answers = append(answers, aaaaRecord(qname, 60, record.AAAARecord))
+				responseCode = dns.RcodeSuccess
+				s.Stats.AAAAQueries++
+				logger.Log.Debug("AAAA record found for ", qname)
+			} else {
+				responseCode = dns.RcodeSuccess
+				logger.Log.Debug("No matching record type found for ", qname)
+			}
 		} else {
 			responseCode = dns.RcodeSuccess
-			logger.Log.Debug("No matching record type found for ", qname)
+			logger.Log.Debug("No record found for ", qname)
 		}
-	} else {
-		responseCode = dns.RcodeSuccess
-		logger.Log.Debug("No record found for ", qname)
 	}
 
 	if qtype == dns.TypeSOA {

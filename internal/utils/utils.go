@@ -36,3 +36,17 @@ func GenerateSerial() uint32 {
 func StringContains(s string, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
+
+func ParseIPAddressFromHostname(hostname string) string {
+	parts := strings.Split(hostname, ".")
+	ipParts := parts[:len(parts)-3]
+	for i, j := 0, len(ipParts)-1; i < j; i, j = i+1, j-1 {
+		ipParts[i], ipParts[j] = ipParts[j], ipParts[i]
+	}
+	reversedIP := strings.Join(ipParts, ".")
+	if strings.Contains(reversedIP, ":") {
+		reversedIP = strings.ReplaceAll(reversedIP, ".", ":")
+	}
+
+	return reversedIP
+}

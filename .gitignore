@@ -1,3 +1,4 @@
 .idea/
 **/dddns.db*
 **/dddns.log*
+./bin/dddns
