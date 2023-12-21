@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"github.com/DifuseHQ/dddns/pkg/logger"
+	"net"
 	"strings"
 	"time"
 )
@@ -37,16 +38,41 @@ func StringContains(s string, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
-func ParseIPAddressFromHostname(hostname string) string {
-	parts := strings.Split(hostname, ".")
-	ipParts := parts[:len(parts)-3]
-	for i, j := 0, len(ipParts)-1; i < j; i, j = i+1, j-1 {
-		ipParts[i], ipParts[j] = ipParts[j], ipParts[i]
+func ParseIPv6Subdomain(subdomain string) string {
+	subdomainParts := strings.Split(subdomain, ".")
+	var possibleIPv6 string
+	if strings.Contains(subdomainParts[len(subdomainParts)-1], "-") {
+		possibleIPv6 = strings.ReplaceAll(subdomainParts[len(subdomainParts)-1], "-", ":")
+	} else {
+		if len(subdomainParts) < 8 {
+			return ""
+		}
+		possibleIPv6 = strings.Join(subdomainParts[len(subdomainParts)-8:], ":")
 	}
-	reversedIP := strings.Join(ipParts, ".")
-	if strings.Contains(reversedIP, ":") {
-		reversedIP = strings.ReplaceAll(reversedIP, ".", ":")
+	address := net.ParseIP(possibleIPv6)
+
+	return address.String()
+}
+
+func ParseIPv4Subdomain(subdomain string) string {
+	subdomainParts := strings.Split(subdomain, ".")
+
+	var possibleIPv4 string
+
+	if strings.Contains(subdomainParts[len(subdomainParts)-1], "-") {
+		possibleIPv4 = strings.ReplaceAll(subdomainParts[len(subdomainParts)-1], "-", ".")
+	} else {
+		if len(subdomainParts) < 4 {
+			return ""
+		}
+		possibleIPv4 = strings.Join(subdomainParts[len(subdomainParts)-4:], ".")
 	}
 
-	return reversedIP
+	address := net.ParseIP(possibleIPv4)
+
+	if address.To4() == nil {
+		return ""
+	}
+
+	return address.String()
 }

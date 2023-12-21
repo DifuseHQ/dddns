@@ -2,6 +2,7 @@ package dns
 
 import (
 	"database/sql"
+	"fmt"
 	"github.com/DifuseHQ/dddns/internal/db"
 	"github.com/DifuseHQ/dddns/internal/db/model"
 	"github.com/DifuseHQ/dddns/internal/utils"
@@ -74,17 +75,26 @@ func (s *DNSServer) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 	s.Stats.TotalQueries++
 
-	if utils.DomainEndsWith(qname, ".backname.difusedns.com") {
-		logger.Log.Debug("Backname hostname found for ", qname)
-		ipAddress := utils.ParseIPAddressFromHostname(qname)
+	if utils.DomainEndsWith(qname, fmt.Sprintf(".backname.%s.", s.domain)) || utils.DomainEndsWith(qname, fmt.Sprintf(".backname.%s", s.domain)) {
+		subdomainOnly := strings.TrimSuffix(qname, ".backname.difusedns.com.")
 		if qtype == dns.TypeA {
-			answers = append(answers, aRecord(qname, 60, ipAddress))
-			responseCode = dns.RcodeSuccess
-			s.Stats.AQueries++
+			ipAddress := utils.ParseIPv4Subdomain(subdomainOnly)
+			if ipAddress != "" {
+				answers = append(answers, aRecord(qname, 60, ipAddress))
+				responseCode = dns.RcodeSuccess
+				s.Stats.AQueries++
+			} else {
+				responseCode = dns.RcodeSuccess
+			}
 		} else if qtype == dns.TypeAAAA {
-			answers = append(answers, aaaaRecord(qname, 60, ipAddress))
-			responseCode = dns.RcodeSuccess
-			s.Stats.AAAAQueries++
+			ipAddress := utils.ParseIPv6Subdomain(subdomainOnly)
+			if ipAddress != "" {
+				answers = append(answers, aaaaRecord(qname, 60, ipAddress))
+				responseCode = dns.RcodeSuccess
+				s.Stats.AAAAQueries++
+			} else {
+				responseCode = dns.RcodeSuccess
+			}
 		} else {
 			responseCode = dns.RcodeNameError
 		}
